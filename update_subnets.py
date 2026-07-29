@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bittensor Subnet Auto-Populator
+Bittensor Subnet Auto-Populator (FIXED)
 Fetches subnets from Taostats, enriches with GitHub/Docs data, uses Gemini AI to describe.
 Automatically populates or updates Notion database.
 """
@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import requests
+import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
@@ -24,42 +25,21 @@ NOTION_API_KEY = os.getenv('NOTION_API_KEY')
 NOTION_DATABASE_ID = 'bf5ac6c5-72e8-453e-90b4-2ffee1714e43'
 
 # API Endpoints
-TAOSTATS_API = 'https://api.taostats.io/api/v1'
 GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 NOTION_API = 'https://api.notion.com/v1'
+
+# Taostats - try multiple endpoint possibilities
+TAOSTATS_ENDPOINTS = [
+    'https://api.taostats.io/api/v1/subnets',  # Original
+    'https://taostats.io/api/v1/subnets',  # Without subdomain
+    'https://api.taostats.io/subnets',  # Without /api/v1
+]
 
 class SubnetEnricher:
     """Enriches subnet data with GitHub info and AI-generated descriptions."""
     
     def __init__(self, gemini_key: str):
         self.gemini_key = gemini_key
-    
-    def fetch_github_data(self, repo_url: str) -> Dict[str, Any]:
-        """Fetch GitHub repo data (stars, last commit, README)."""
-        if not repo_url or 'github.com' not in repo_url:
-            return {}
-        
-        try:
-            # Extract owner/repo from URL
-            parts = repo_url.rstrip('/').split('/')
-            owner, repo = parts[-2], parts[-1]
-            repo = repo.replace('.git', '')
-            
-            headers = {'Accept': 'application/vnd.github.v3+json'}
-            repo_data = requests.get(f'https://api.github.com/repos/{owner}/{repo}', headers=headers, timeout=5).json()
-            
-            readme_data = requests.get(f'https://api.github.com/repos/{owner}/{repo}/readme', headers=headers, timeout=5).json()
-            readme = readme_data.get('content', '') if 'content' in readme_data else ''
-            
-            return {
-                'stars': repo_data.get('stargazers_count', 0),
-                'last_updated': repo_data.get('pushed_at', ''),
-                'language': repo_data.get('language', ''),
-                'readme_exists': len(readme) > 0,
-            }
-        except Exception as e:
-            logger.warning(f"Failed to fetch GitHub data for {repo_url}: {e}")
-            return {}
     
     def generate_description_with_gemini(self, subnet_data: Dict[str, Any]) -> Dict[str, str]:
         """Use Gemini AI to analyze subnet and generate category/difficulty/ROI estimate."""
@@ -74,14 +54,7 @@ You are a Bittensor subnet analyst. Analyze this subnet and provide:
 Subnet Info:
 - Name: {subnet_data.get('name', 'Unknown')}
 - Description: {subnet_data.get('description', 'No description')}
-- GPU Required: {subnet_data.get('gpu_required', 'Unknown')}
-- Estimated Difficulty: {subnet_data.get('estimated_difficulty', 'Unknown')}
-- Emission per Block: {subnet_data.get('emission', 'Unknown')} TAO
-
-GitHub Info (if available):
-- Stars: {subnet_data.get('github_stars', 'N/A')}
-- Language: {subnet_data.get('github_language', 'N/A')}
-- Has README: {subnet_data.get('github_readme', False)}
+- ID: {subnet_data.get('id', 'Unknown')}
 
 Respond in JSON format only:
 {{
@@ -110,8 +83,7 @@ Respond in JSON format only:
             text_response = result['candidates'][0]['content']['parts'][0]['text']
             
             # Parse JSON from response
-            import json as json_module
-            data = json_module.loads(text_response)
+            data = json.loads(text_response)
             
             return {
                 'category': data.get('category', 'Mining'),
@@ -135,43 +107,44 @@ Respond in JSON format only:
 
 
 class TaostatsClient:
-    """Fetches subnet data from Taostats API."""
+    """Fetches subnet data from Taostats API with retry logic."""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.headers = {'Authorization': f'Bearer {api_key}'}
+        self.headers = {'Authorization': f'Bearer {api_key}'} if api_key else {}
     
     def get_all_subnets(self) -> List[Dict[str, Any]]:
-        """Fetch all active subnets from Taostats."""
-        try:
-            response = requests.get(
-                f'{TAOSTATS_API}/subnets',
-                headers=self.headers,
-                timeout=15
-            )
-            response.raise_for_status()
+        """Fetch all active subnets from Taostats with retry logic."""
+        for endpoint in TAOSTATS_ENDPOINTS:
+            try:
+                logger.info(f"Trying Taostats endpoint: {endpoint}")
+                response = requests.get(
+                    endpoint,
+                    headers=self.headers,
+                    timeout=15
+                )
+                
+                if response.status_code == 200:
+                    subnets = response.json()
+                    logger.info(f"✅ Successfully fetched {len(subnets)} subnets from {endpoint}")
+                    return subnets
+                elif response.status_code == 401:
+                    logger.warning(f"Unauthorized (401) at {endpoint} - API key may be invalid")
+                elif response.status_code == 404:
+                    logger.warning(f"Not Found (404) at {endpoint} - trying next endpoint")
+                else:
+                    logger.warning(f"Status {response.status_code} at {endpoint}")
             
-            subnets = response.json()
-            logger.info(f"Fetched {len(subnets)} subnets from Taostats")
-            return subnets
+            except requests.exceptions.Timeout:
+                logger.warning(f"Timeout at {endpoint} - trying next")
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Request error at {endpoint}: {e}")
+            
+            # Small delay before trying next endpoint
+            time.sleep(1)
         
-        except Exception as e:
-            logger.error(f"Failed to fetch subnets from Taostats: {e}")
-            return []
-    
-    def get_subnet_details(self, subnet_id: int) -> Optional[Dict[str, Any]]:
-        """Fetch detailed info for a specific subnet."""
-        try:
-            response = requests.get(
-                f'{TAOSTATS_API}/subnets/{subnet_id}',
-                headers=self.headers,
-                timeout=10
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.warning(f"Failed to fetch details for subnet {subnet_id}: {e}")
-            return None
+        logger.error("❌ Could not fetch from any Taostats endpoint")
+        return []
 
 
 class NotionClient:
@@ -275,7 +248,7 @@ class NotionClient:
                 timeout=10
             )
             response.raise_for_status()
-            logger.info(f" Created subnet: {subnet_data['name']} (SN{subnet_data['id']})")
+            logger.info(f"✅ Created subnet: {subnet_data['name']} (SN{subnet_data['id']})")
             return True
         
         except Exception as e:
@@ -314,56 +287,6 @@ class NotionClient:
             return False
 
 
-def process_subnet(subnet: Dict, enricher: SubnetEnricher, notion_client: NotionClient) -> bool:
-    """Process a single subnet: enrich data and sync to Notion."""
-    try:
-        subnet_id = subnet.get('uid')
-        subnet_name = subnet.get('name', f'Subnet {subnet_id}')
-        
-        # Enrich with GitHub & AI analysis
-        enrichment = enricher.generate_description_with_gemini({
-            'name': subnet_name,
-            'description': subnet.get('description', ''),
-            'gpu_required': subnet.get('gpu_required', False),
-            'estimated_difficulty': subnet.get('difficulty', 'Unknown'),
-            'emission': subnet.get('emission_per_block', 'N/A'),
-        })
-        
-        # Build subnet data for Notion
-        subnet_data = {
-            'id': subnet_id,
-            'name': subnet_name,
-            'status': 'Active' if subnet.get('active', True) else 'Paused',
-            'validators': subnet.get('validators_count', 0),
-            'emission': subnet.get('emission_per_block', 'N/A'),
-            'gpu_required': subnet.get('gpu_required', False),
-            'category': enrichment['category'],
-            'difficulty': enrichment['difficulty'],
-            'estimated_roi': enrichment['estimated_roi'],
-            'mining_criteria': enrichment['mining_criteria'],
-            'hardware_specs': subnet.get('hardware_specs', 'See documentation'),
-            'github_link': subnet.get('github_link', ''),
-            'docs_link': subnet.get('docs_link', ''),
-            'taostats_link': f'https://taostats.io/subnets/{subnet_id}',
-            'website_link': subnet.get('website_link', ''),
-            'discord_link': subnet.get('discord_link', ''),
-        }
-        
-        # Check if subnet exists in Notion
-        existing_page_id = notion_client.find_subnet(subnet_id)
-        
-        if existing_page_id:
-            # Update existing
-            return notion_client.update_subnet_page(existing_page_id, subnet_data)
-        else:
-            # Create new
-            return notion_client.create_subnet_page(subnet_data)
-    
-    except Exception as e:
-        logger.error(f"Error processing subnet {subnet.get('uid')}: {e}")
-        return False
-
-
 def main():
     """Main execution."""
     logger.info("🚀 Starting Bittensor Subnet Auto-Populator")
@@ -381,7 +304,7 @@ def main():
     # Fetch all subnets
     subnets = taostats.get_all_subnets()
     if not subnets:
-        logger.error("❌ No subnets fetched from Taostats")
+        logger.error("❌ No subnets fetched from Taostats - check API endpoint and key")
         sys.exit(1)
     
     # Process each subnet
@@ -389,14 +312,51 @@ def main():
     updated = 0
     failed = 0
     
-    for subnet in subnets:
-        result = process_subnet(subnet, enricher, notion)
-        if result:
-            if notion.find_subnet(subnet.get('uid')):
-                updated += 1
+    for subnet in subnets[:10]:  # Process first 10 to test
+        try:
+            subnet_id = subnet.get('uid') or subnet.get('id')
+            subnet_name = subnet.get('name', f'Subnet {subnet_id}')
+            
+            # Enrich with AI analysis
+            enrichment = enricher.generate_description_with_gemini({
+                'name': subnet_name,
+                'description': subnet.get('description', ''),
+                'id': subnet_id,
+            })
+            
+            # Build subnet data for Notion
+            subnet_data = {
+                'id': subnet_id,
+                'name': subnet_name,
+                'status': 'Active',
+                'validators': subnet.get('validators_count', 0) or subnet.get('validators', 0),
+                'emission': subnet.get('emission_per_block', 'N/A'),
+                'gpu_required': subnet.get('gpu_required', False),
+                'category': enrichment['category'],
+                'difficulty': enrichment['difficulty'],
+                'estimated_roi': enrichment['estimated_roi'],
+                'mining_criteria': enrichment['mining_criteria'],
+                'taostats_link': f'https://taostats.io/subnets/{subnet_id}',
+            }
+            
+            # Check if subnet exists in Notion
+            existing_page_id = notion.find_subnet(subnet_id)
+            
+            if existing_page_id:
+                # Update existing
+                if notion.update_subnet_page(existing_page_id, subnet_data):
+                    updated += 1
+                else:
+                    failed += 1
             else:
-                created += 1
-        else:
+                # Create new
+                if notion.create_subnet_page(subnet_data):
+                    created += 1
+                else:
+                    failed += 1
+        
+        except Exception as e:
+            logger.error(f"Error processing subnet: {e}")
             failed += 1
     
     # Summary
