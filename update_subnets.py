@@ -275,7 +275,7 @@ class NotionClient:
                 timeout=10
             )
             response.raise_for_status()
-            logger.info(f"✅ Created subnet: {subnet_data['name']} (SN{subnet_data['id']})")
+            logger.info(f" Created subnet: {subnet_data['name']} (SN{subnet_data['id']})")
             return True
         
         except Exception as e:
