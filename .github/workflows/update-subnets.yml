@@ -40,7 +40,7 @@ jobs:
           webhook-url: ${{ secrets.SLACK_WEBHOOK }}
           payload: |
             {
-              "text": " Bittensor Subnet Update Failed",
+              "text": "❌ Bittensor Subnet Update Failed",
               "blocks": [
                 {
                   "type": "section",
