@@ -1,9 +1,9 @@
-name: Update Bittensor Subnets
+name: Update Bittensor Subnets (Blockchain)
 
 on:
   schedule:
-    # Run every 6 hours (0:00, 6:00, 12:00, 18:00 UTC)
-    - cron: '0 */6 * * *'
+    # Run every 12 hours (0:00, 12:00 UTC)
+    - cron: '0 0,12 * * *'
   
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
@@ -24,11 +24,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests bittensor
       
-      - name: Run subnet auto-populator
+      - name: Run Bittensor blockchain subnet populator
         env:
-          TAOSTATS_API_KEY: ${{ secrets.TAOSTATS_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
         run: python update_subnets.py
+        continue-on-error: false
