@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Bittensor SDK Diagnostic
-Connects to the chain and lists every method related to 'subnet' or 'metagraph'
-that actually exists on this installed SDK version, so we stop guessing.
+Bittensor SDK Diagnostic v2
+subtensor.subnets is a namespace object (not a plain method) in SDK v11.
+This inspects what's actually callable inside it.
 """
 
 import os
@@ -12,69 +12,50 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-try:
-    import bittensor as bt
-    logger.info(f"✅ Bittensor SDK loaded — version: {getattr(bt, '__version__', 'unknown')}")
-except ImportError:
-    os.system('pip install bittensor')
-    import bittensor as bt
+import bittensor as bt
+logger.info(f"Bittensor SDK version: {bt.__version__}")
 
+subtensor = bt.subtensor(network='finney')
+logger.info("✅ Connected")
 
-def main():
-    logger.info("Connecting to Bittensor finney...")
-    subtensor = bt.subtensor(network='finney')
-    logger.info("✅ Connected")
+ns = subtensor.subnets
+logger.info(f"subtensor.subnets is: {type(ns)}")
 
-    all_methods = dir(subtensor)
+methods = [m for m in dir(ns) if not m.startswith('_')]
+logger.info(f"\n{'='*60}")
+logger.info(f"METHODS/ATTRS on subtensor.subnets ({len(methods)} found):")
+for m in methods:
+    attr = getattr(ns, m)
+    kind = 'callable' if callable(attr) else 'value'
+    logger.info(f"  - {m}  ({kind})")
+logger.info(f"{'='*60}\n")
 
-    subnet_related = [m for m in all_methods if 'subnet' in m.lower() and not m.startswith('_')]
-    metagraph_related = [m for m in all_methods if 'metagraph' in m.lower() and not m.startswith('_')]
-    netuid_related = [m for m in all_methods if 'netuid' in m.lower() and not m.startswith('_')]
+# Try the most likely ones and show actual results
+likely = ['all', 'all_info', 'get_all', 'list', 'get', 'info', 'all_subnets']
+for name in likely:
+    if hasattr(ns, name):
+        attr = getattr(ns, name)
+        logger.info(f"✅ FOUND: subnets.{name}")
+        if callable(attr):
+            try:
+                import inspect
+                sig = inspect.signature(attr)
+                logger.info(f"   signature: {name}{sig}")
+            except Exception as e:
+                logger.info(f"   (no signature: {e})")
+            # Try actually calling it with no args
+            try:
+                result = attr()
+                logger.info(f"   ✅ CALLED SUCCESSFULLY. Result type: {type(result)}")
+                if hasattr(result, '__len__'):
+                    logger.info(f"   Length: {len(result)}")
+                if hasattr(result, '__iter__'):
+                    first = next(iter(result), None)
+                    if first is not None:
+                        logger.info(f"   First item type: {type(first)}")
+                        logger.info(f"   First item attrs: {[a for a in dir(first) if not a.startswith('_')][:20]}")
+                        logger.info(f"   First item repr: {repr(first)[:300]}")
+            except Exception as e:
+                logger.info(f"   ❌ call failed: {e}")
 
-    logger.info(f"\n{'='*60}")
-    logger.info(f"METHODS CONTAINING 'subnet' ({len(subnet_related)} found):")
-    for m in subnet_related:
-        logger.info(f"  - {m}")
-
-    logger.info(f"\nMETHODS CONTAINING 'metagraph' ({len(metagraph_related)} found):")
-    for m in metagraph_related:
-        logger.info(f"  - {m}")
-
-    logger.info(f"\nMETHODS CONTAINING 'netuid' ({len(netuid_related)} found):")
-    for m in netuid_related:
-        logger.info(f"  - {m}")
-
-    logger.info(f"{'='*60}\n")
-
-    # Try the most likely candidates and show what they actually return
-    candidates = [
-        'get_subnets',
-        'all_subnets',
-        'subnets',
-        'get_all_subnets_info',
-        'get_metagraph_info',
-        'metagraph',
-        'get_subnet_info',
-        'subnet_exists',
-    ]
-
-    logger.info("Testing likely candidates:")
-    for name in candidates:
-        if hasattr(subtensor, name):
-            attr = getattr(subtensor, name)
-            logger.info(f"  ✅ EXISTS: {name} -> {type(attr)}")
-            if callable(attr):
-                try:
-                    import inspect
-                    sig = inspect.signature(attr)
-                    logger.info(f"     signature: {name}{sig}")
-                except Exception as e:
-                    logger.info(f"     (could not get signature: {e})")
-        else:
-            logger.info(f"  ❌ missing: {name}")
-
-    logger.info("\nDiagnostic complete. Copy the full log output back to Claude.")
-
-
-if __name__ == '__main__':
-    main()
+logger.info("\nDiagnostic v2 complete. Copy the full log output back to Claude.")
