@@ -172,21 +172,31 @@ class NotionClient:
             logger.error(f"Create failed for SN{d['id']}: {e}")
             return False
 
-    def update_subnet_page(self, page_id: str, d: Dict[str, Any]) -> bool:
+  def update_subnet_page(self, page_id: str, d: Dict[str, Any]) -> bool:
         try:
             page = {
                 'properties': {
+                    'Subnet Name': {'title': [{'text': {'content': d['name']}}]},
+                    'Categories': {'multi_select': [{'name': d['category']}]},
+                    'Difficulty': {'multi_select': [{'name': d['difficulty']}]},
+                    'Estimated ROI': {'rich_text': [{'text': {'content': d['estimated_roi']}}]},
                     'Validators': {'number': d.get('validators', 0)},
                     'Emissions per Block': {'rich_text': [{'text': {'content': str(d.get('burn', 'N/A'))}}]},
+                    'Hardware Specs': {'rich_text': [{'text': {'content': d.get('hardware_specs', 'See docs')}}]},
+                    'GitHub Link': {'url': d.get('github', '') or ''},
+                    'Notes': {'rich_text': [{'text': {'content': d.get('mining_criteria', '')}}]},
                     'Status': {'select': {'name': 'Active'}},
                 }
             }
             r = requests.patch(f'{NOTION_API}/pages/{page_id}', headers=self.headers, json=page, timeout=10)
-            return r.status_code < 300
+            if r.status_code >= 300:
+                logger.error(f"Notion update failed for SN{d['id']} ({r.status_code}): {r.text[:200]}")
+                return False
+            logger.info(f"🔄 Updated SN{d['id']}: {d['name']}")
+            return True
         except Exception as e:
             logger.warning(f"Update failed: {e}")
             return False
-
 
 def main():
     logger.info("🚀 Bittensor Subnet Auto-Populator (Real Data Version)")
