@@ -127,6 +127,7 @@ class NotionClient:
                     'Estimated ROI': {'rich_text': [{'text': {'content': d['estimated_roi']}}]},
                     'Validators': {'number': d.get('validators', 0)},
                     'Emissions per Block': {'rich_text': [{'text': {'content': str(d.get('burn', 'N/A'))}}]},
+                    'Hardware Specs': {'rich_text': [{'text': {'content': d.get('hardware_specs', 'See docs')}}]},
                     'Taostats Link': {'url': f'https://taostats.io/subnets/{d["id"]}'},
                     'Notes': {'rich_text': [{'text': {'content': d.get('mining_criteria', '')}}]},
                 }
