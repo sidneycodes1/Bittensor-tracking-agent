@@ -178,7 +178,7 @@ def main():
     created = updated = failed = 0
 
     # Process first 15 this run — confirm it works end-to-end before scaling to all 129
-    for info in raw_subnets[:15]:
+    for info in raw_subnets:
         try:
             netuid = info.netuid
             subnet = {
