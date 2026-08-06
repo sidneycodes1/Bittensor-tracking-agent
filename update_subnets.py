@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 NOTION_API_KEY = os.getenv('NOTION_API_KEY')
-NOTION_DATABASE_ID = 'bf5ac6c5-72e8-453e-90b4-2ffee1714e43'
+NOTION_DATABASE_ID = 'c38cadde-ded5-4c42-b24e-4acb3c4bcffa'
 
 GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 NOTION_API = 'https://api.notion.com/v1'
