@@ -3,7 +3,7 @@ name: Update Bittensor Subnets (Blockchain)
 on:
   schedule:
     # Run every 12 hours (0:00, 12:00 UTC)
-    - cron: '0 0,12 * * *'
+  - cron: '0 */1 * * *'
   
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
