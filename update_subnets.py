@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Bittensor Subnet Auto-Populator — FINAL WORKING VERSION
-Confirmed API: subtensor.subnets.all() returns list[SubnetInfo]
-Each SubnetInfo has: netuid, neuron_count, tempo, burn
+Bittensor Subnet Auto-Populator — REAL DATA VERSION
+Pulls actual subnet names/descriptions/GitHub links from Taostats' public
+registry, blends with live blockchain stats, uses AI only to categorize.
 """
 
 import os
@@ -22,9 +22,23 @@ NOTION_DATABASE_ID = 'c38cadde-ded5-4c42-b24e-4acb3c4bcffa'
 
 GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 NOTION_API = 'https://api.notion.com/v1'
+SUBNET_REGISTRY_URL = 'https://raw.githubusercontent.com/taostat/subnets-infos/main/subnets.json'
 
 import bittensor as bt
 logger.info(f"✅ Bittensor SDK {bt.__version__} loaded")
+
+
+def fetch_subnet_registry() -> Dict[str, Any]:
+    """Fetch real subnet names/descriptions/GitHub links maintained by Taostats."""
+    try:
+        r = requests.get(SUBNET_REGISTRY_URL, timeout=15)
+        r.raise_for_status()
+        registry = r.json()
+        logger.info(f"✅ Loaded real metadata for {len(registry)} subnets from Taostats registry")
+        return registry
+    except Exception as e:
+        logger.warning(f"Could not fetch subnet registry: {e}")
+        return {}
 
 
 class SubnetEnricher:
@@ -32,26 +46,41 @@ class SubnetEnricher:
         self.gemini_key = gemini_key
 
     def analyze(self, subnet_data: Dict[str, Any]) -> Dict[str, str]:
+        has_real_info = subnet_data.get('real_name') and subnet_data.get('real_description')
+
         try:
-            prompt = f"""
-You are explaining a Bittensor subnet to someone with ZERO crypto/tech background — a complete beginner.
+            if has_real_info:
+                prompt = f"""
+Someone with ZERO crypto background wants to understand this real Bittensor subnet.
 
-Subnet #{subnet_data['id']} on the Bittensor network.
-Data we know: {subnet_data['validators']} active nodes, tempo of {subnet_data.get('tempo', 'unknown')} blocks, registration cost of {subnet_data.get('burn', 'unknown')} TAO.
+Subnet #{subnet_data['id']}: "{subnet_data['real_name']}"
+Official description: {subnet_data['real_description']}
+Network stats: {subnet_data['validators']} active nodes, registration cost {subnet_data.get('burn', 'unknown')} TAO.
 
-Write a JSON response with these fields:
-
+Based on this REAL description, write JSON with:
 "category": one of Mining, Development, Creator, Validator, Data
-
 "difficulty": one of Beginner, Intermediate, Advanced
+"mining_criteria": 3-4 plain-English sentences explaining, based on the official description above: what this subnet actually does, what running a miner on it involves in practice, and who it's realistically a good fit for.
+"estimated_roi": one practical sentence on realistic earning expectations for this specific type of work
+"hardware_specs": specific hardware needed for THIS subnet's actual task (e.g. if it's LLM/image work, likely needs GPU; if it's data collection, likely doesn't)
 
-"mining_criteria": Write 4-5 full sentences in PLAIN ENGLISH, like you're explaining it to a smart friend who has never touched crypto. Cover: (1) what this subnet most likely does or is used for based on its subnet number and typical Bittensor subnet patterns, (2) what "mining" on it actually means in practice — do they run software, provide computing power, submit data, etc, (3) roughly what kind of computer/setup they'd need, (4) who this is realistically a good fit for (a beginner tinkering vs someone with serious GPU hardware vs a developer). If you are not confident what this specific subnet does, say so honestly and suggest checking taostats.io/subnets/{subnet_data['id']} for the current description rather than guessing wildly.
+Respond in JSON only, no markdown:
+{{"category": "...", "difficulty": "...", "mining_criteria": "...", "estimated_roi": "...", "hardware_specs": "..."}}
+"""
+            else:
+                prompt = f"""
+This Bittensor subnet (#{subnet_data['id']}) has no public registry entry yet — it may be new, unregistered, or private.
 
-"estimated_roi": one practical sentence on realistic earning expectations and what affects them (competition, hardware quality, network conditions) — not just "ROI varies"
+Network stats: {subnet_data['validators']} active nodes, registration cost {subnet_data.get('burn', 'unknown')} TAO.
 
-"hardware_specs": Be specific — either "No special hardware, just a laptop and internet connection" for low-barrier subnets, or actual specs like "Dedicated GPU (RTX 3080 or better), 32GB RAM, stable internet" for compute-heavy ones — base this on what's typical for the category you picked.
+Write JSON with:
+"category": your best guess from Mining, Development, Creator, Validator, Data
+"difficulty": Beginner, Intermediate, or Advanced
+"mining_criteria": Be HONEST that no official description exists yet for this subnet. Suggest checking taostats.io/subnets/{subnet_data['id']} directly for current info. Do not fabricate details about what it does.
+"estimated_roi": "Unknown — no public data available for this subnet yet"
+"hardware_specs": "Unknown — check taostats.io/subnets/{subnet_data['id']} or the subnet's Discord for details"
 
-Respond in JSON only, no markdown formatting:
+Respond in JSON only, no markdown:
 {{"category": "...", "difficulty": "...", "mining_criteria": "...", "estimated_roi": "...", "hardware_specs": "..."}}
 """
             response = requests.post(
@@ -59,7 +88,7 @@ Respond in JSON only, no markdown formatting:
                 params={'key': self.gemini_key},
                 json={
                     'contents': [{'parts': [{'text': prompt}]}],
-                    'generationConfig': {'temperature': 0.4, 'maxOutputTokens': 600}
+                    'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 500}
                 },
                 timeout=15
             )
@@ -81,18 +110,18 @@ Respond in JSON only, no markdown formatting:
                 'hardware_specs': data.get('hardware_specs', 'See official docs'),
             }
         except Exception as e:
-            logger.warning(f"Gemini error for subnet: {e}")
+            logger.warning(f"Gemini error for subnet {subnet_data.get('id')}: {e}")
             return self._default()
 
     def _default(self) -> Dict[str, str]:
         return {
             'category': 'Mining',
             'difficulty': 'Intermediate',
-            'mining_criteria': 'Bittensor subnet — see Taostats for details',
-            'estimated_roi': 'ROI varies',
+            'mining_criteria': 'No data available — see Taostats for details',
+            'estimated_roi': 'Unknown',
             'hardware_specs': 'See official docs',
         }
-        
+
 
 class NotionClient:
     def __init__(self, api_key: str, database_id: str):
@@ -129,6 +158,7 @@ class NotionClient:
                     'Emissions per Block': {'rich_text': [{'text': {'content': str(d.get('burn', 'N/A'))}}]},
                     'Hardware Specs': {'rich_text': [{'text': {'content': d.get('hardware_specs', 'See docs')}}]},
                     'Taostats Link': {'url': f'https://taostats.io/subnets/{d["id"]}'},
+                    'GitHub Link': {'url': d.get('github', '') or ''},
                     'Notes': {'rich_text': [{'text': {'content': d.get('mining_criteria', '')}}]},
                 }
             }
@@ -136,7 +166,7 @@ class NotionClient:
             if r.status_code >= 300:
                 logger.error(f"Notion create failed for SN{d['id']} ({r.status_code}): {r.text[:200]}")
                 return False
-            logger.info(f"✅ Created SN{d['id']}")
+            logger.info(f"✅ Created SN{d['id']}: {d['name']}")
             return True
         except Exception as e:
             logger.error(f"Create failed for SN{d['id']}: {e}")
@@ -159,11 +189,13 @@ class NotionClient:
 
 
 def main():
-    logger.info("🚀 Bittensor Subnet Auto-Populator")
+    logger.info("🚀 Bittensor Subnet Auto-Populator (Real Data Version)")
 
     if not all([GEMINI_API_KEY, NOTION_API_KEY]):
         logger.error("Missing GEMINI_API_KEY or NOTION_API_KEY")
         sys.exit(1)
+
+    registry = fetch_subnet_registry()
 
     logger.info("Connecting to Bittensor finney...")
     subtensor = bt.subtensor(network='finney')
@@ -178,16 +210,24 @@ def main():
 
     created = updated = failed = 0
 
-    # Process first 15 this run — confirm it works end-to-end before scaling to all 129
     for info in raw_subnets:
         try:
             netuid = info.netuid
+            registry_entry = registry.get(str(netuid), {})
+            real_name = registry_entry.get('name', '')
+            real_description = registry_entry.get('description', '')
+            real_github = registry_entry.get('github', '')
+
+            display_name = real_name if real_name and real_name != 'Unknown' else f'Subnet {netuid}'
+
             subnet = {
                 'id': netuid,
-                'name': f'Subnet {netuid}',
+                'name': display_name,
                 'validators': getattr(info, 'neuron_count', 0),
-                'tempo': getattr(info, 'tempo', 'N/A'),
                 'burn': getattr(info, 'burn', 'N/A'),
+                'real_name': real_name if real_name != 'Unknown' else '',
+                'real_description': real_description,
+                'github': real_github,
             }
 
             enrichment = enricher.analyze(subnet)
