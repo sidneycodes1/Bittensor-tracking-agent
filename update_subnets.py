@@ -171,8 +171,8 @@ class NotionClient:
         except Exception as e:
             logger.error(f"Create failed for SN{d['id']}: {e}")
             return False
-
- def update_subnet_page(self, page_id: str, d: Dict[str, Any]) -> bool:
+            
+            def update_subnet_page(self, page_id: str, d: Dict[str, Any]) -> bool:
         try:
             page = {
                 'properties': {
