@@ -34,22 +34,34 @@ class SubnetEnricher:
     def analyze(self, subnet_data: Dict[str, Any]) -> Dict[str, str]:
         try:
             prompt = f"""
-Analyze this Bittensor subnet and respond in JSON only:
-{{"category": "Mining|Development|Creator|Validator|Data", "difficulty": "Beginner|Intermediate|Advanced", "mining_criteria": "2-3 sentence description", "estimated_roi": "brief estimate"}}
+You are explaining a Bittensor subnet to someone with ZERO crypto/tech background — a complete beginner.
 
-Subnet ID: {subnet_data['id']}
-Neuron count: {subnet_data['validators']}
-Tempo: {subnet_data.get('tempo', 'Unknown')}
-Burn cost: {subnet_data.get('burn', 'Unknown')} TAO
+Subnet #{subnet_data['id']} on the Bittensor network.
+Data we know: {subnet_data['validators']} active nodes, tempo of {subnet_data.get('tempo', 'unknown')} blocks, registration cost of {subnet_data.get('burn', 'unknown')} TAO.
+
+Write a JSON response with these fields:
+
+"category": one of Mining, Development, Creator, Validator, Data
+
+"difficulty": one of Beginner, Intermediate, Advanced
+
+"mining_criteria": Write 4-5 full sentences in PLAIN ENGLISH, like you're explaining it to a smart friend who has never touched crypto. Cover: (1) what this subnet most likely does or is used for based on its subnet number and typical Bittensor subnet patterns, (2) what "mining" on it actually means in practice — do they run software, provide computing power, submit data, etc, (3) roughly what kind of computer/setup they'd need, (4) who this is realistically a good fit for (a beginner tinkering vs someone with serious GPU hardware vs a developer). If you are not confident what this specific subnet does, say so honestly and suggest checking taostats.io/subnets/{subnet_data['id']} for the current description rather than guessing wildly.
+
+"estimated_roi": one practical sentence on realistic earning expectations and what affects them (competition, hardware quality, network conditions) — not just "ROI varies"
+
+"hardware_specs": Be specific — either "No special hardware, just a laptop and internet connection" for low-barrier subnets, or actual specs like "Dedicated GPU (RTX 3080 or better), 32GB RAM, stable internet" for compute-heavy ones — base this on what's typical for the category you picked.
+
+Respond in JSON only, no markdown formatting:
+{{"category": "...", "difficulty": "...", "mining_criteria": "...", "estimated_roi": "...", "hardware_specs": "..."}}
 """
             response = requests.post(
                 GEMINI_API,
                 params={'key': self.gemini_key},
                 json={
                     'contents': [{'parts': [{'text': prompt}]}],
-                    'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 250}
+                    'generationConfig': {'temperature': 0.4, 'maxOutputTokens': 600}
                 },
-                timeout=10
+                timeout=15
             )
             if response.status_code != 200:
                 return self._default()
@@ -66,6 +78,7 @@ Burn cost: {subnet_data.get('burn', 'Unknown')} TAO
                 'difficulty': data.get('difficulty', 'Intermediate'),
                 'mining_criteria': data.get('mining_criteria', 'Bittensor subnet'),
                 'estimated_roi': data.get('estimated_roi', 'ROI varies'),
+                'hardware_specs': data.get('hardware_specs', 'See official docs'),
             }
         except Exception as e:
             logger.warning(f"Gemini error for subnet: {e}")
@@ -77,8 +90,9 @@ Burn cost: {subnet_data.get('burn', 'Unknown')} TAO
             'difficulty': 'Intermediate',
             'mining_criteria': 'Bittensor subnet — see Taostats for details',
             'estimated_roi': 'ROI varies',
+            'hardware_specs': 'See official docs',
         }
-
+        
 
 class NotionClient:
     def __init__(self, api_key: str, database_id: str):
