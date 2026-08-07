@@ -204,9 +204,21 @@ class NotionClient:
             'Validators': {'number': d.get('validators', 0)},
             'Emissions per Block': {'rich_text': [{'text': {'content': str(d.get('burn', 'N/A'))}}]},
             'Hardware Specs': {'rich_text': [{'text': {'content': d.get('hardware_specs', 'See docs')}}]},
-            'GitHub Link': {'url': d.get('github', '') or ''},
             'Notes': {'rich_text': [{'text': {'content': d.get('mining_criteria', '')}}]},
             'Status': {'select': {'name': 'Active'}},
+            'Subnet Name': {'title': [{'text': {'content': d['name']}}]},
+        }
+        github_url = d.get('github', '')
+        if github_url:
+            props['GitHub Link'] = {'url': github_url}
+        if d.get('market_cap') is not None:
+            props['Market Cap'] = {'rich_text': [{'text': {'content': '$' + format(d['market_cap'], ',.0f')}}]}
+        if d.get('change_24h') is not None:
+            props['24h Price Change'] = {'rich_text': [{'text': {'content': format(d['change_24h'], '.2f') + '%'}}]}
+        if include_create_only:
+            props['Subnet ID'] = {'number': d['id']}
+            props['Taostats Link'] = {'url': 'https://taostats.io/subnets/' + str(d['id'])}
+        return props
         }
         if d.get('market_cap') is not None:
             props['Market Cap'] = {'rich_text': [{'text': {'content': '$' + format(d['market_cap'], ',.0f')}}]}
